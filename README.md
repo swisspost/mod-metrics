@@ -14,9 +14,25 @@ Default config:
       address  : "org.swisspush.metrics"
     }
 
+With customer MetricRegistry:
+
+    SharedMetricRegistries.add(
+        "my-registry",
+        new MyMetricRegistry());
+    SharedMetricRegistries.setDefault("my-registry");
+
+Config: 
+
+    {
+      address  : "org.swisspush.metrics",
+      registryName  :  "my-registry"
+    }
+
+
 Deploy with:
 
     vertx.deployVerticle("org.swisspush.metrics.MetricsModule", deploymentOptions, handler) ;
+
 
 You should then be able to point jconsole (or jvisualvm with the jmx plugin) at the
 machine running this module and see stats appear as they are populated.
