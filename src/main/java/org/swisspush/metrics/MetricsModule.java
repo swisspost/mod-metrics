@@ -48,7 +48,15 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
         logger.info("Starting MetricsModule");
         config = config();
         address = getOptionalStringConfig( "address", "org.swisspush.metrics" ) ;
+        String registryName = getOptionalStringConfig( "registryName", null ) ;
+
         metrics = new MetricRegistry() ;
+        if (registryName != null) {
+            MetricRegistry other = SharedMetricRegistries.add(registryName, metrics);
+            if (other != null) {
+                metrics = other;
+            }
+        }
         timers = new HashMap<>() ;
         gauges = new ConcurrentHashMap<>() ;
         JmxReporter.forRegistry( metrics ).build().start() ;
