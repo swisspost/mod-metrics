@@ -59,9 +59,11 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
         }
         timers = new HashMap<>() ;
         gauges = new ConcurrentHashMap<>() ;
-        JmxReporter.forRegistry( metrics ).build().start() ;
+        JmxReporter.forRegistry( metrics )
+                .createsObjectNamesWith(new SimpleObjectNameFactory())
+                .build().start() ;
 
-        logger.info("Register consumer for event bus address '"+address+"'");
+        logger.info("Register consumer for event bus address '" + address + "'");
         vertx.eventBus().consumer( address, this ) ;
 
         startPromise.complete();
