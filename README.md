@@ -126,6 +126,40 @@ If you want to remove a metric from the system, just send the message:
         action : "remove"
     }
 
+## Batches
+
+Multiple sub-messages can be sent in a single event bus message by using the
+reserved `"batch"` action with a `"metrics"` array containing the individual
+messages (each formatted as described above):
+
+    {
+        action  : "batch",
+        metrics : [
+            { name : "counter.name", action : "inc" },
+            { name : "gauge.name",   action : "set", n : 128 }
+        ]
+    }
+
+The reply contains the top-level `status` (`"ok"` only if every sub-message
+succeeded, `"error"` otherwise) plus a `"results"` array with one entry per
+sub-message, in the same order, each with its own `status` and, on error, a
+`message`:
+
+    {
+        status  : "ok",
+        results : [
+            { status : "ok" },
+            { status : "ok" }
+        ]
+    }
+
+**Note:** batches are **not atomic**. Sub-messages are applied one after
+another as they are encountered, so if a later sub-message fails, any earlier
+sub-messages in the same batch will already have taken effect. A
+`status : "error"` reply therefore does not mean the batch had no effect at
+all - check the individual `results` entries to see which sub-messages
+succeeded.
+
 ## Reading values over the EventBus
 
 ### counters

@@ -177,6 +177,52 @@ public class MetricsTests {
         });
     }
 
+    @Test
+    public void testBatchEmpty(TestContext context) {
+        Async async = context.async();
+        JsonObject batch = batchOperation();
+        eventBusSend(batch, event -> {
+            context.assertEquals(OK, extractStatus(event));
+            JsonArray results = event.result().body().getJsonArray("results");
+            context.assertEquals(0, results.size());
+            async.complete();
+        });
+    }
+
+    @Test
+    public void testBatchWithNonObjectItem(TestContext context) {
+        Async async = context.async();
+        JsonArray metrics = new JsonArray().add(incOperation(COUNTER)).add("not-an-object");
+        JsonObject batch = new JsonObject().put("action", "batch").put("metrics", metrics);
+        eventBusSend(batch, event -> {
+            context.assertEquals("error", extractStatus(event));
+            JsonArray results = event.result().body().getJsonArray("results");
+            context.assertEquals(2, results.size());
+            context.assertEquals(OK, results.getJsonObject(0).getString("status"));
+            context.assertEquals("error", results.getJsonObject(1).getString("status"));
+            context.assertNotNull(results.getJsonObject(1).getString("message"));
+
+            // Reset state - the valid sub-message still gets applied
+            eventBusSend(decOperation(COUNTER), r -> async.complete());
+        });
+    }
+
+    @Test
+    public void testBatchWithInternalExceptionUsesFallbackMessage(TestContext context) {
+        Async async = context.async();
+        // "update" on a histogram without the required "n" causes an NPE (null Integer
+        // unboxing) inside the action handler, exercising the null-message fallback path.
+        JsonObject batch = batchOperation(buildOperation("histogram.name", "update"));
+        eventBusSend(batch, event -> {
+            context.assertEquals("error", extractStatus(event));
+            JsonArray results = event.result().body().getJsonArray("results");
+            context.assertEquals(1, results.size());
+            context.assertEquals("error", results.getJsonObject(0).getString("status"));
+            context.assertNotNull(results.getJsonObject(0).getString("message"));
+            async.complete();
+        });
+    }
+
     private String extractStatus(AsyncResult<Message<JsonObject>> reply){
         return reply.result().body().getString("status");
     }

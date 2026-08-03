@@ -94,11 +94,23 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
      * Checks whether the given message body describes a batch message
      * (i.e. the "action" field is "batch" and it contains multiple sub-messages
      * to be processed in one go) as opposed to a normal, single-action message.
+     * Note: "batch" is therefore a reserved action value and cannot be used as a
+     * regular single-message action.
      */
     private boolean isBatch( final JsonObject body ) {
         return "batch".equals( body.getString( "action" ) ) ;
     }
 
+    /**
+     * Processes every sub-message contained in the "metrics" array of a batch message
+     * and replies with the aggregated per-item results.
+     * <p>
+     * <b>Note:</b> batches are <i>not</i> atomic. Sub-messages are applied one after
+     * another as they are encountered, so if a later sub-message fails or is invalid,
+     * any earlier sub-messages in the same batch will already have been applied. A
+     * reply with {@code status=error} therefore does not mean the batch had no effect;
+     * check the individual "results" entries to see which sub-messages succeeded.
+     */
     private void handleBatch( final Message<JsonObject> message, final JsonObject body ) {
         final JsonArray metrics = body.getJsonArray( "metrics" ) ;
         if( metrics == null ) {
@@ -111,8 +123,13 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
         JsonArray results = new JsonArray() ;
         boolean hasError = false ;
         for( Object item : metrics ) {
-            JsonObject subBody = (JsonObject) item ;
-            JsonObject result = processAction( subBody ) ;
+            JsonObject result ;
+            if( item instanceof JsonObject ) {
+                result = processAction( (JsonObject) item ) ;
+            } else {
+                result = new JsonObject().put( "status", "error" )
+                        .put( "message", "batch item must be a JSON object" ) ;
+            }
             if( "error".equals( result.getString( "status" ) ) ) {
                 hasError = true ;
             }
@@ -209,7 +226,8 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
             }
         } catch (Exception e) {
             logger.error("Error while processing action '"+action+"' and name '"+name+"'", e);
-            return new JsonObject().put( "status", "error" ).put( "message", e.getMessage() ) ;
+            String message = e.getMessage() != null ? e.getMessage() : e.toString() ;
+            return new JsonObject().put( "status", "error" ).put( "message", message ) ;
         }
     }
 
@@ -233,7 +251,7 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
     private JsonObject decrementCounter(String name, JsonObject body){
         Integer value = getOptionalInteger( body, "n", 1 );
         logger.debug("decrementing counter with name '"+name+"' by " + value);
-        metrics.counter( name ).dec( value ); ;
+        metrics.counter( name ).dec( value ) ;
         return new JsonObject().put( "status", "ok" ) ;
     }
 
