@@ -127,8 +127,7 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
             if( item instanceof JsonObject ) {
                 result = processAction( (JsonObject) item ) ;
             } else {
-                result = new JsonObject().put( "status", "error" )
-                        .put( "message", "batch item must be a JSON object" ) ;
+                result = createErrorResponse("batch item must be a JSON object") ;
             }
             if( "error".equals( result.getString( "status" ) ) ) {
                 hasError = true ;
@@ -160,7 +159,7 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
      */
     private JsonObject processAction( final JsonObject body ) {
         if( body == null ) {
-            return new JsonObject().put( "status", "error" ).put( "message", "message body must be specified" ) ;
+            return createErrorResponse("message body must be specified") ;
         }
 
         final String action = body.getString( "action" ) ;
@@ -169,7 +168,7 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
         logger.debug("Handling message with action '"+action+"' and name '"+name+"'");
 
         if( action == null ) {
-            return new JsonObject().put( "status", "error" ).put( "message", "action must be specified" ) ;
+            return createErrorResponse("action must be specified") ;
         }
 
         try {
@@ -222,12 +221,12 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
                     return collectTimers();
 
                 default:
-                    return new JsonObject().put( "status", "error" ).put( "message", "Invalid action : " + action ) ;
+                    return createErrorResponse("Invalid action : " + action) ;
             }
         } catch (Exception e) {
             logger.error("Error while processing action '"+action+"' and name '"+name+"'", e);
             String message = e.getMessage() != null ? e.getMessage() : e.toString() ;
-            return new JsonObject().put( "status", "error" ).put( "message", message ) ;
+            return createErrorResponse(message) ;
         }
     }
 
@@ -238,40 +237,40 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
         if( metrics.getMetrics().get( name ) == null ) {
             metrics.register( name, (Gauge<Integer>) () -> gauges.get( name )) ;
         }
-        return new JsonObject().put( "status", "ok" ) ;
+        return createOkResponse() ;
     }
 
     private JsonObject incrementCounter(String name, JsonObject body){
         Integer value = getOptionalInteger( body, "n", 1 );
         logger.debug("incrementing counter with name '"+name+"' by " + value);
         metrics.counter( name ).inc( value ) ;
-        return new JsonObject().put( "status", "ok" ) ;
+        return createOkResponse() ;
     }
 
     private JsonObject decrementCounter(String name, JsonObject body){
         Integer value = getOptionalInteger( body, "n", 1 );
         logger.debug("decrementing counter with name '"+name+"' by " + value);
         metrics.counter( name ).dec( value ) ;
-        return new JsonObject().put( "status", "ok" ) ;
+        return createOkResponse() ;
     }
 
     private JsonObject markMeter(String name){
         metrics.meter( name ).mark() ;
         logger.debug("marking meter with name '"+name+"'");
-        return new JsonObject().put( "status", "ok" ) ;
+        return createOkResponse() ;
     }
 
     private JsonObject updateHistogram(String name, JsonObject body){
         Integer value = body.getInteger("n");
         logger.debug("updating histogram with name '"+name+"' and value " + value);
         metrics.histogram( name ).update( value ) ;
-        return new JsonObject().put( "status", "ok" ) ;
+        return createOkResponse() ;
     }
 
     private JsonObject startTimer(String name){
         logger.debug("starting timer with name '"+name+"'");
         timers.put( name, metrics.timer( name ).time() ) ;
-        return new JsonObject().put( "status", "ok" ) ;
+        return createOkResponse() ;
     }
 
     private JsonObject stopTimer(String name){
@@ -280,14 +279,14 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
         if( c != null ) {
             c.stop() ;
         }
-        return new JsonObject().put( "status", "ok" ) ;
+        return createOkResponse() ;
     }
 
     private JsonObject removeMetric(String name){
         logger.debug("removing metric with name '"+name+"'");
         metrics.remove( name ) ;
         gauges.remove( name ) ;
-        return new JsonObject().put( "status", "ok" ) ;
+        return createOkResponse() ;
     }
 
     private JsonObject collectGauges(){
@@ -297,7 +296,7 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
                     serialiseGauge( entry.getValue(), new JsonObject() ) ) ;
         }
         logger.debug("getting values for gauges. reply with " + reply.encode());
-        return reply.put( "status", "ok" ) ;
+        return createOkResponse(reply) ;
     }
 
     private JsonObject collectCounters(){
@@ -308,7 +307,7 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
                             new JsonObject() ) ) ;
         }
         logger.debug("getting values for counters. reply with " + reply.encode());
-        return reply.put( "status", "ok" ) ;
+        return createOkResponse(reply) ;
     }
 
     private JsonObject collectHistograms(){
@@ -320,7 +319,7 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
                                     new JsonObject() ) ) ) ;
         }
         logger.debug("getting values for histograms. reply with " + reply.encode());
-        return reply.put( "status", "ok" ) ;
+        return createOkResponse(reply) ;
     }
 
     private JsonObject collectMeters(){
@@ -331,7 +330,7 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
                             new JsonObject() ) ) ;
         }
         logger.debug("getting values for meters. reply with " + reply.encode());
-        return reply.put( "status", "ok" ) ;
+        return createOkResponse(reply) ;
     }
 
     private JsonObject collectTimers(){
@@ -343,7 +342,7 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
                                     new JsonObject() ) ) ) ;
         }
         logger.debug("getting values for timers. reply with " + reply.encode());
-        return reply.put( "status", "ok" ) ;
+        return createOkResponse(reply) ;
     }
 
     private JsonObject serialiseGauge( Gauge gauge, JsonObject ret ) {
@@ -387,16 +386,28 @@ public class MetricsModule extends AbstractVerticle implements Handler<Message<J
 
     private void sendError(Message<JsonObject> message, String error, Exception e) {
         logger.error(error, e);
-        JsonObject json = new JsonObject().put("status", "error").put("message", error);
+        JsonObject json = createErrorResponse(error);
         message.reply(json);
-    }
-
-    private void sendOK(Message<JsonObject> message) {
-        sendOK(message, null);
     }
 
     private void sendOK(Message<JsonObject> message, JsonObject json) {
         sendStatus("ok", message, json);
+    }
+
+    private JsonObject createStatusResponse(String status) {
+        return new JsonObject().put("status", status);
+    }
+
+    private JsonObject createOkResponse() {
+        return createStatusResponse("ok");
+    }
+
+    private JsonObject createOkResponse(JsonObject data) {
+        return data.put("status", "ok");
+    }
+
+    private JsonObject createErrorResponse(String message) {
+        return new JsonObject().put("status", "error").put("message", message);
     }
 
     private void sendStatus(String status, Message<JsonObject> message, JsonObject json) {
