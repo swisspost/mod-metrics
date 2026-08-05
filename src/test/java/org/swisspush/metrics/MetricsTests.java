@@ -4,9 +4,8 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.eventbus.Message;
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
-import io.vertx.core.logging.Logger;
-import io.vertx.core.logging.LoggerFactory;
 import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import io.vertx.ext.unit.junit.VertxUnitRunner;
@@ -21,7 +20,6 @@ import org.junit.runner.RunWith;
 public class MetricsTests {
 
     Vertx vertx;
-    Logger log = LoggerFactory.getLogger(MetricsTests.class);
     String address = "org.swisspush.metrics";
 
     private final String COUNTER = "test.counter";
@@ -120,6 +118,111 @@ public class MetricsTests {
         });
     }
 
+    @Test
+    public void testBatchAllSuccess(TestContext context) {
+        Async async = context.async();
+        JsonObject batch = batchOperation(
+                incOperation(COUNTER),
+                incOperation(COUNTER, 4),
+                setOperation(GAUGE, 42)
+        );
+        eventBusSend(batch, event -> {
+            context.assertEquals(OK, extractStatus(event));
+            JsonArray results = event.result().body().getJsonArray("results");
+            context.assertEquals(3, results.size());
+            for (int i = 0; i < results.size(); i++) {
+                context.assertEquals(OK, results.getJsonObject(i).getString("status"));
+            }
+
+            eventBusSend(countersOperation(), reply -> {
+                context.assertEquals(5, reply.result().body().getJsonObject(COUNTER).getInteger("count"));
+
+                eventBusSend(gaugesOperation(), reply2 -> {
+                    context.assertEquals(42, reply2.result().body().getJsonObject(GAUGE).getInteger("value"));
+
+                    // Reset state
+                    eventBusSend(decOperation(COUNTER, 5), r1 ->
+                        eventBusSend(removeOperation(GAUGE), r2 -> async.complete()));
+                });
+            });
+        });
+    }
+
+    @Test
+    public void testBatchWithError(TestContext context) {
+        Async async = context.async();
+        JsonObject batch = batchOperation(
+                incOperation(COUNTER),
+                buildOperation("invalidAction")
+        );
+        eventBusSend(batch, event -> {
+            context.assertEquals("error", extractStatus(event));
+            JsonArray results = event.result().body().getJsonArray("results");
+            context.assertEquals(2, results.size());
+            context.assertEquals(OK, results.getJsonObject(0).getString("status"));
+            context.assertEquals("error", results.getJsonObject(1).getString("status"));
+
+            // Reset state - the valid sub-message still gets applied
+            eventBusSend(decOperation(COUNTER), r -> async.complete());
+        });
+    }
+
+    @Test
+    public void testBatchMissingMessagesArray(TestContext context) {
+        Async async = context.async();
+        JsonObject batch = new JsonObject().put("action", "batch");
+        eventBusSend(batch, event -> {
+            context.assertEquals("error", extractStatus(event));
+            async.complete();
+        });
+    }
+
+    @Test
+    public void testBatchEmpty(TestContext context) {
+        Async async = context.async();
+        JsonObject batch = batchOperation();
+        eventBusSend(batch, event -> {
+            context.assertEquals(OK, extractStatus(event));
+            JsonArray results = event.result().body().getJsonArray("results");
+            context.assertEquals(0, results.size());
+            async.complete();
+        });
+    }
+
+    @Test
+    public void testBatchWithNonObjectItem(TestContext context) {
+        Async async = context.async();
+        JsonArray metrics = new JsonArray().add(incOperation(COUNTER)).add("not-an-object");
+        JsonObject batch = new JsonObject().put("action", "batch").put("metrics", metrics);
+        eventBusSend(batch, event -> {
+            context.assertEquals("error", extractStatus(event));
+            JsonArray results = event.result().body().getJsonArray("results");
+            context.assertEquals(2, results.size());
+            context.assertEquals(OK, results.getJsonObject(0).getString("status"));
+            context.assertEquals("error", results.getJsonObject(1).getString("status"));
+            context.assertNotNull(results.getJsonObject(1).getString("message"));
+
+            // Reset state - the valid sub-message still gets applied
+            eventBusSend(decOperation(COUNTER), r -> async.complete());
+        });
+    }
+
+    @Test
+    public void testBatchWithInternalExceptionUsesFallbackMessage(TestContext context) {
+        Async async = context.async();
+        // "update" on a histogram without the required "n" causes an NPE (null Integer
+        // unboxing) inside the action handler, exercising the null-message fallback path.
+        JsonObject batch = batchOperation(buildOperation("histogram.name", "update"));
+        eventBusSend(batch, event -> {
+            context.assertEquals("error", extractStatus(event));
+            JsonArray results = event.result().body().getJsonArray("results");
+            context.assertEquals(1, results.size());
+            context.assertEquals("error", results.getJsonObject(0).getString("status"));
+            context.assertNotNull(results.getJsonObject(0).getString("message"));
+            async.complete();
+        });
+    }
+
     private String extractStatus(AsyncResult<Message<JsonObject>> reply){
         return reply.result().body().getString("status");
     }
@@ -176,6 +279,14 @@ public class MetricsTests {
         JsonObject op = new JsonObject();
         op.put("action", action);
         return op;
+    }
+
+    private JsonObject batchOperation(JsonObject... operations){
+        JsonArray metrics = new JsonArray();
+        for (JsonObject operation : operations) {
+            metrics.add(operation);
+        }
+        return new JsonObject().put("action", "batch").put("metrics", metrics);
     }
 
     private void eventBusSend(JsonObject operation, Handler<AsyncResult<Message<JsonObject>>> handler){
